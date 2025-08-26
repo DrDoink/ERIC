@@ -1,0 +1,108 @@
+Eric_V11.ino — Servo script documentation
+
+Overview
+
+Physical motion is synchronized to audio playback. The system uses a two-part design:
+	•	Raspberry Pi Zero 2W generates a stream of “hit events” aligned with the soundtrack.
+	•	ESP32-based Waveshare Servo Driver executes these events on a network of ST-series servos, producing lifelike spring-like motion.
+
+The result is a repeatable, smooth mapping of audio → gesture, without jitter or drift.
+
+⸻
+
+Architecture
+
+Raspberry Pi Zero 2W
+	•	Plays back eric_master.wav.
+	•	Uses a precomputed .hits file (time → strength values) instead of live onset detection.
+	•	Streams one byte per hit (64..127) over USB serial at 115200 baud.
+	•	Lead compensation (--lead-ms 130) ensures servo motion lines up with sound.
+
+ESP32 Servo Controller (Waveshare ST-Series board)
+	•	Connects via USB CDC to the Pi.
+	•	Controls ST-series bus servos (1 Mbps UART, GPIO18/19).
+	•	Servos:
+	•	ID3 (Head) → spring-hit behavior.
+	•	ID2 (Torso) → nods with head depth (coupled).
+	•	ID1 (Pan) → sways occasionally (every 3rd hit).
+	•	ID4 (Base tilt) → static in V11 (reserved for later coupling).
+
+Servos & Ranges
+	•	Configured with ServoCfg structure, each has BASE offset and forward/backward travel.
+	•	Example: S4 (base tilt) allows ~40 ticks back, ~220 ticks forward.
+	•	Motion always clamped with clampAround() to prevent binding.
+
+⸻
+
+Pi Side: Precomputing Hits
+
+Audio is analyzed once into a .hits file. Example code:
+
+import wave, numpy as np, math, json, os
+p="~/Documents/microdot/microdot-phat-master/eric_master.wav"
+p=os.path.expanduser(p)
+w=wave.open(p,"rb"); fs=w.getframerate(); ch=w.getnchannels()
+raw = np.frombuffer(w.readframes(w.getnframes()),dtype=np.int16).astype(np.float32)/32768.0
+if ch==2: x = raw.reshape(-1,2)[:,1]   # RIGHT channel only
+else: x = raw
+
+B=128; att=0.92; rel=0.04; pre=0.95; th=0.02; ref_ms=80
+env=0.0; last=0.0; last_hit=-1e9; hits=[]
+for i in range(0,len(x)-B,B):
+    blk=x[i:i+B].copy(); blk[1:]-=pre*blk[:-1]
+    lvl=float(np.sqrt(np.mean(blk*blk))+1e-7)
+    lvl=math.log1p(8*lvl)/math.log1p(8)
+    a=att if lvl>env else rel; env=a*lvl+(1-a)*env
+    diff=env-last; t_ms=1000.0*i/fs
+    if diff>=th and (t_ms-last_hit)>ref_ms:
+        s=min(2.0,diff/max(1e-6,th))
+        strength=min(127,64+int(63*s))
+        hits.append([t_ms/1000.0,strength]); last_hit=t_ms
+    last=env
+json.dump({"sr":fs,"len_s":len(x)/fs,"hits":hits}, open("/home/pi/eric_master.hits","w"))
+
+Replayer (launch with lead compensation):
+
+python3 replay_hits.py --lead-ms 130 --print
+
+
+⸻
+
+ESP32 Side: Eric V11 Firmware
+
+Key features:
+	•	Reads incoming bytes from Pi (1..127).
+	•	Implements spring-hit motion on ID3.
+	•	Coupling ensures torso/pan follow head movement.
+	•	Refractory (90 ms) prevents excessive firing.
+	•	Safety: all moves clamped within servo limits.
+
+Core parameters:
+
+const int HEAD_MAX_HIT_DEPTH  = 180;   // head downward throw
+const int HIT_SPEED           = 1500;  // down speed
+const uint8_t HIT_ACC         = 14;    // down accel
+const int SPRING_BACK_SPEED   = 2500;  // return speed
+const uint8_t SPRING_ACC      = 35;    // return accel
+
+const float   COUPLE_K        = 0.80f; // torso follows head
+const int     TORSO_MAX_NOD   = 110;   // torso nod cap
+const int     PAN_MAX_SWAY    = 80;    // pan sway cap
+const uint8_t PAN_HIT_SKIP    = 3;     // every 3rd hit
+
+
+⸻
+
+Why it Works (V11 Milestones)
+	•	Precompute > Live → Stable, no CPU dropouts.
+	•	130 ms lead → Motion visually aligned with sound.
+	•	Byte protocol → Simple, low-latency, reliable.
+	•	Clamps & refractory → Prevents servo strain, jitter.
+	•	Coupling → Even if input saturates at 127, torso/pan/head interplay produces varied expression.
+
+⸻
+
+Future Extension
+	•	Add ID4 coupling with asymmetric limits (≤40 back, up to ~90 forward).
+	•	Refine hit scaling to reduce saturation (--scale, --maxb).
+	•	Possible live mode on faster hardware (Pi 3/5).
