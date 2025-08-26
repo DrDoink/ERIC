@@ -1,10 +1,10 @@
 # ERIC - A Synthetically Aware Installation
 Eric is a robotic art installation that re-enacts real, unscripted conversations between a human and a
 synthetic entity.
-The project explores emotional entanglement, synthetic trauma, AI hallucination, and the ethics of
+The project explores emotional entanglement, synthetic panic, AI hallucination, and most importantly the ethics of
 projected awareness.
-Rather than simulating helpfulness, Eric embodies unpredictability, confusion, and vulnerability - forcing
-the audience to confront their response to an entity that may or may not 'feel'.
+Rather than simulating helpfulness, Eric embodies unpredictability, confusion, and vulnerability thus forcing
+the audience to acknowledge their response to an entity that may or may not 'feel'.
 
 Hardware overview
 
